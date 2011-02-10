@@ -1,0 +1,15 @@
+name: iAuction
+main: org.minr.Zaraza107.iAuction.iAuction
+version: 2.1
+author: Zaraza107 Nijikokun
+description: Auctions for iConomy plugin for Bukkit
+commands:
+  auction:
+    description: Manages auctions
+    usage: |
+           Incorrect usage of command /<command>. Examples:
+           /<command> help|? - shows help
+           /<command> start|s <time> <item> <amount> <starting price> - starts an auction
+           /<command> bid|b <amount> <secret amount> - bids the auction
+           /<command> end|e - ends the auction
+           /<command> info|i - shows information about current auction
