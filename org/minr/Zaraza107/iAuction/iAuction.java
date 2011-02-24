@@ -28,10 +28,10 @@ import com.bukkit.dthielke.herochat.HeroChatPlugin;
 import com.bukkit.dthielke.herochat.Channel;
 
 /**
- * iAuction for iConomy for Bukkit #172+ (Craftbukkit #354+)
+ * iAuction for iConomy for Bukkit #412 (Craftbukkit #432)
  *
  * @author Zaraza107
- * @version 2.3 beta
+ * @version 2.4
  */
 public class iAuction extends JavaPlugin {
 
@@ -496,7 +496,7 @@ public class iAuction extends JavaPlugin {
     }
 
     public void auctionBid(Player player, String[] msg) {
-    	if(!permissionsEnabled || !this.Permissions.has(player, "auction.bid")) {
+    	if(!permissionsEnabled || this.Permissions.has(player, "auction.bid")) {
     		if(msg.length == 2 || msg.length == 3) {
     			if(player != auctionOwner) {
     				String name = player.getName();
