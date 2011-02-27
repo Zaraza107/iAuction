@@ -1,6 +1,6 @@
 name: iAuction
 main: org.minr.Zaraza107.iAuction.iAuction
-version: 2.4
+version: 2.5
 author: Zaraza107
 description: Auctions for iConomy plugin for Bukkit
 commands:

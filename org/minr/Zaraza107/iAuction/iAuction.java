@@ -12,14 +12,15 @@ import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.material.MaterialData;
 import org.bukkit.plugin.PluginDescriptionFile;
-import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.inventory.*;
 import org.bukkit.command.*;
+import org.bukkit.plugin.Plugin;
 
-import com.nijikokun.bukkit.iConomy.iConomy;
-import com.nijikokun.bukkit.iConomy.Messaging;
+import com.nijiko.coelho.iConomy.iConomy;
+//import com.nijiko.coelho.iConomy.util.Messaging;
+import com.nijiko.coelho.iConomy.system.Bank;
+import com.nijiko.coelho.iConomy.system.Account;
 
 import com.nijiko.permissions.PermissionHandler;
 import com.nijikokun.bukkit.Permissions.Permissions;
@@ -27,17 +28,18 @@ import com.nijikokun.bukkit.Permissions.Permissions;
 import com.bukkit.dthielke.herochat.HeroChatPlugin;
 import com.bukkit.dthielke.herochat.Channel;
 
+import org.anjocaido.groupmanager.GroupManager;
+
 /**
- * iAuction for iConomy for Bukkit #412 (Craftbukkit #432)
+ * iAuction for iConomy for Bukkit #414 (Craftbukkit #440)
  *
  * @author Zaraza107
- * @version 2.4
+ * @version 2.5
  */
 public class iAuction extends JavaPlugin {
 
     private final HashMap<Player, Boolean> debugees = new HashMap<Player, Boolean>();
     public static Server server;
-    public String currency = "";
     private Timer auctionTimer;
     private TimerTask auctionTT;
     public boolean isAuction = false;
@@ -48,21 +50,24 @@ public class iAuction extends JavaPlugin {
     private short auctionItemDamage;
     private int auction_item_byte;
     private int auctionItemAmount;
-    private int auctionItemStarting;
-    private int auctionItemBid;
+    private double auctionItemStarting;
+    private double auctionItemBid;
     private boolean win = false;
-    private int currentBid;
+    private double currentBid;
     public Player timerPlayer;
     public String tag;
-    public iConomy iConomy;
-    public PermissionHandler Permissions;
+    public static iConomy iConomy;
+    public static Bank bank;
+    public static PermissionHandler Permissions;
+    public static GroupManager groupManager;
     private boolean permissionsEnabled = false;
+    private boolean groupManagerEnabled = false;
     public static HeroChatPlugin herochat;
     
     private int maxTime;
     
     private boolean hcEnabled;
-    private String hcChannelName;
+    private static String hcChannelName;
     
     private String tagColor;
     private String warningColor;
@@ -82,43 +87,42 @@ public class iAuction extends JavaPlugin {
     public static iProperty Item;
     public static HashMap<String, String> items;
     public static iProperty Settings;
-
+    
+    public iAuction() {
+    	
+    }
+    
     public void onEnable() {
     	server = getServer();
-        PluginManager pm = server.getPluginManager();
         PluginDescriptionFile pdfFile = this.getDescription();
-        System.out.println(Messaging.bracketize(pdfFile.getName()) + " (version " + pdfFile.getVersion() + ") is enabled!");
-
-        Plugin ic = server.getPluginManager().getPlugin("iConomy");
-        if (ic == null) {
-            System.out.println(Messaging.bracketize("iAuction") + " Warning! iConomy plugin is not loaded!");
-        } else {
-            iConomy = (iConomy)ic;
-            currency = this.iConomy.currency;
-        }
+        System.out.println("[" + pdfFile.getName() + "] (version " + pdfFile.getVersion() + ") is enabled!");
+        
+        enableiConomy();
 
         Item = new iProperty("items.db");
         setupItems();
-        setupPermissions();
         setupSettings();
+        
+        //server.getPluginManager().registerEvent(Event.Type.PLUGIN_ENABLE, Listener, Event.Priority.Monitor, this);
     }
 
     public void onDisable() {
         PluginDescriptionFile pdfFile = this.getDescription();
-        System.out.println(Messaging.bracketize("iAuction") + " version " + pdfFile.getVersion() + " is disabled.");
+        System.out.println("[iAuction]" + " version " + pdfFile.getVersion() + " is disabled.");
     }
 
     /**
      * Setup Items
      */
     public void setupItems() {
-        Map mappedItems = null;
+        @SuppressWarnings("rawtypes")
+		Map mappedItems = null;
         items = new HashMap<String, String>();
 
         try {
             mappedItems = Item.returnMap();
         } catch (Exception ex) {
-            System.out.println(Messaging.bracketize("iAuction") + " could not open items.db!");
+            System.out.println("[iAuction]" + " could not open items.db!");
         }
 
         if (mappedItems != null) {
@@ -163,17 +167,19 @@ public class iAuction extends JavaPlugin {
     	
     	maxTime = Settings.getInt("maximal-time", 0);
     	hcEnabled = Settings.getBoolean("enable-herochat", false);
-    	if(hcEnabled) {
+    	if(hcEnabled == true) {
     		hcChannelName = Settings.getString("herochat-channel-name", null);
-    		if(hcChannelName != null) {
-    	        Plugin hc = server.getPluginManager().getPlugin("HeroChat");
-    	        if (hc == null) {
-    	            System.out.println(Messaging.bracketize("iAuction") + " Warning! HeroChat plugin is enabled but could not get loaded!");
-    	        } else {
-    	            herochat = (HeroChatPlugin)hc;
-    	        }
-    		}
+    		if(hcChannelName != null)
+    			enableHeroChat();
     	}
+    	
+    	String perm = Settings.getString("permission-plugin", "permissions");
+    	if(perm.equalsIgnoreCase("permissions"))
+    		enablePermissions();
+    	else if(perm.equalsIgnoreCase("groupmanager"))
+    		enableGroupManager();
+    	else
+    		System.out.println("[iAuction] WARNING! No permission system enabled!");
     	
     	tagColor = ChatColor.valueOf(Settings.getString("tag-color", "yellow").toUpperCase()).toString();
     	warningColor = ChatColor.valueOf(Settings.getString("warning-color", "red").toUpperCase()).toString();
@@ -190,21 +196,6 @@ public class iAuction extends JavaPlugin {
     	tag = tagColor + "[AUCTION] ";
     }
 
-    public void setupPermissions() {
-        Plugin test = this.getServer().getPluginManager().getPlugin("Permissions");
-
-        if (this.Permissions == null) {
-            if (test != null) {
-                this.Permissions = ((Permissions)test).getHandler();
-                System.out.println(Messaging.bracketize("iAuction") + " Permission system enabled.");
-                permissionsEnabled = true;
-            } else {
-                System.out.println(Messaging.bracketize("iAuction") + " Permission system not enabled. Disabling support.");
-                permissionsEnabled = false;
-            }
-        }
-    }
-
     public boolean isDebugging(final Player player) {
         if (debugees.containsKey(player)) {
             return debugees.get(player);
@@ -215,6 +206,59 @@ public class iAuction extends JavaPlugin {
 
     public void setDebugging(final Player player, final boolean value) {
         debugees.put(player, value);
+    }
+    
+    public void enableiConomy() {
+    	Plugin p = server.getPluginManager().getPlugin("iConomy");
+    	if(p != null) {
+    		if(!p.isEnabled())
+    			server.getPluginManager().enablePlugin(p);
+    		iConomy = (iConomy)p;
+    		bank = iConomy.getBank();
+    	} else
+    		System.out.println("[iAuction] WARNING! iConomy not detected!");
+    }
+    
+    public void enablePermissions() {
+    	Plugin p = server.getPluginManager().getPlugin("Permissions");
+    	if(p != null) {
+    		if(!p.isEnabled())
+    			server.getPluginManager().enablePlugin(p);
+    		Permissions = ((Permissions)p).getHandler();
+    		permissionsEnabled = true;
+    		
+    		System.out.println("[iAuction] Permissions support enabled!");
+    	} else
+    		System.out.println("[iAuction] Permissions system is enabled but could not be loaded!");
+    }
+    
+    public void enableGroupManager() {
+    	Plugin p = server.getPluginManager().getPlugin("GroupManager");
+        if(p != null) {
+            if(!p.isEnabled())
+                server.getPluginManager().enablePlugin(p);
+            GroupManager gm = (GroupManager)p;
+            groupManager = gm;
+            Permissions = gm.getPermissionHandler();
+            groupManagerEnabled = true;
+            
+            System.out.println("[iAuction] GroupManager support enabled!");
+        } else
+        	System.out.println("[iAuction] GroupManager system is enabled but could not be loaded!");
+    }
+    
+    public void enableHeroChat() {
+    	Plugin p = server.getPluginManager().getPlugin("HeroChat");
+    	if(p != null) {
+    		if(!p.isEnabled())
+    			server.getPluginManager().enablePlugin(p);
+    		hcChannelName = Settings.getString("herochat-channel-name", null);
+    		if(hcChannelName != null) {
+    	            herochat = (HeroChatPlugin)p;
+    	            System.out.println("[iAuction] HeroChat support enabled!");
+    		}
+    	} else
+    		System.out.println("[iAuction] GroupManager system is enabled but could not be loaded!");
     }
     
     public boolean onCommand(CommandSender sender, Command cmd, String commandLabel, String[] args)
@@ -247,16 +291,16 @@ public class iAuction extends JavaPlugin {
     
     public void auctionHelp(Player player) {
     	String or = helpOrColor + "|";
-        Messaging.send(player, tagColor + " -----[ " + auctionStatusColor + "Auction Help" + tagColor + " ]----- ");
-        Messaging.send(player, helpCommandColor + "/auction help" + or + helpCommandColor + "?" + helpMainColor + " - Returns this");
-        Messaging.send(player, helpCommandColor + "/auction start" + or + helpCommandColor + "s" + helpObligatoryColor + " <time> <item> <amount> <starting price>");
-        Messaging.send(player, helpMainColor + "Starts an auction for " + helpObligatoryColor + "<time> " + helpMainColor + "seconds with " + helpObligatoryColor + "<amount>");
-        Messaging.send(player, helpMainColor + "of " + helpObligatoryColor + "<item> " + helpMainColor + "for " + helpObligatoryColor + "<starting price>");
-        Messaging.send(player, helpCommandColor + "/auction bid" + or + helpCommandColor + "b" + helpObligatoryColor + " <bid> " + helpOptionalColor + "(maximum bid)" + helpMainColor + " - Bids the auction.");
-        Messaging.send(player, helpMainColor + "If you set a " + helpOptionalColor + "(maximum bid) " + helpMainColor + "and the " + helpObligatoryColor + "<bid> " + helpMainColor + "is greater than the");
-        Messaging.send(player, helpMainColor + "current, you will outbid that bid if it is lower than your maximum.");
-        Messaging.send(player, helpCommandColor + "/auction end" + or + helpCommandColor + "e" + helpMainColor + " - Ends current auction.");
-        Messaging.send(player, helpCommandColor + "/auction info" + or + helpCommandColor + "i" + helpMainColor + " - Returns auction information.");
+        player.sendMessage(tagColor + " -----[ " + auctionStatusColor + "Auction Help" + tagColor + " ]----- ");
+        player.sendMessage(helpCommandColor + "/auction help" + or + helpCommandColor + "?" + helpMainColor + " - Returns this");
+        player.sendMessage(helpCommandColor + "/auction start" + or + helpCommandColor + "s" + helpObligatoryColor + " <time> <item> <amount> <starting price>");
+        player.sendMessage(helpMainColor + "Starts an auction for " + helpObligatoryColor + "<time> " + helpMainColor + "seconds with " + helpObligatoryColor + "<amount>");
+        player.sendMessage(helpMainColor + "of " + helpObligatoryColor + "<item> " + helpMainColor + "for " + helpObligatoryColor + "<starting price>");
+        player.sendMessage(helpCommandColor + "/auction bid" + or + helpCommandColor + "b" + helpObligatoryColor + " <bid> " + helpOptionalColor + "(maximum bid)" + helpMainColor + " - Bids the auction.");
+        player.sendMessage(helpMainColor + "If you set a " + helpOptionalColor + "(maximum bid) " + helpMainColor + "and the " + helpObligatoryColor + "<bid> " + helpMainColor + "is greater than the");
+        player.sendMessage(helpMainColor + "current, you will outbid that bid if it is lower than your maximum.");
+        player.sendMessage(helpCommandColor + "/auction end" + or + helpCommandColor + "e" + helpMainColor + " - Ends current auction.");
+        player.sendMessage(helpCommandColor + "/auction info" + or + helpCommandColor + "i" + helpMainColor + " - Returns auction information.");
     }
     
     public void warn(Player player, String msg) {
@@ -277,7 +321,7 @@ public class iAuction extends JavaPlugin {
     }
 
     public void auctionStart(Player player, String[] msg) {
-    	if(!permissionsEnabled || this.Permissions.has(player,"auction.start")) {
+    	if(!(permissionsEnabled || groupManagerEnabled) || Permissions.has(player,"auction.start")) {
     		if(!isAuction) {
     			if(msg.length == 5) {
     		        auctionOwner = player;
@@ -286,7 +330,7 @@ public class iAuction extends JavaPlugin {
     		        try {
     		        	auctionTime = Integer.parseInt(msg[1]);
     		        	auctionItemAmount = Integer.parseInt(msg[3]);
-    		            auctionItemStarting = Integer.parseInt(msg[4]);
+    		            auctionItemStarting = Double.parseDouble(msg[4]);
     		        } catch (NumberFormatException ex) {
     		            warn(player, "Invalid syntax.");
     		            help(player);
@@ -402,7 +446,7 @@ public class iAuction extends JavaPlugin {
     	}
     }
 
-    public boolean auctionCheck(Player player, PlayerInventory inventory, int id, int data, int amount, int time, int price) {
+    public boolean auctionCheck(Player player, PlayerInventory inventory, int id, int data, int amount, int time, double price) {
         if (time > 10) {
             ItemStack[] stacks = inventory.getContents();
             int size = 0;
@@ -434,25 +478,25 @@ public class iAuction extends JavaPlugin {
         if (server != null) {
             broadcast(infoPrimaryColor + "Auctioned Item: " + infoSecondaryColor + Items.name(auctionItemId, auction_item_byte) + infoPrimaryColor + " [" + infoSecondaryColor + auctionItemId + infoPrimaryColor + "]");
             broadcast(infoPrimaryColor + "Amount: " + infoSecondaryColor + auctionItemAmount);
-            broadcast(infoPrimaryColor + "Starting Price: " + infoSecondaryColor + auctionItemStarting + " " + this.iConomy.currency);
+            broadcast(infoPrimaryColor + "Starting Price: " + infoSecondaryColor + auctionItemStarting + " " + bank.getCurrency());
             broadcast(infoPrimaryColor + "Owner: " + infoSecondaryColor + auctionOwner.getDisplayName());
         }
         if (player != null) {
         	if (isAuction) {
-                Messaging.send(player, tagColor + "-----[ " + auctionStatusColor + "Auction Information" + tagColor + " ]-----");
-                Messaging.send(player, tag + infoPrimaryColor + "Auctioned Item: " + infoSecondaryColor + Items.name(auctionItemId, auction_item_byte) + infoPrimaryColor + " [" + infoSecondaryColor + auctionItemId + infoPrimaryColor + "]");
-                Messaging.send(player, tag + infoPrimaryColor + "Amount: " + infoSecondaryColor + auctionItemAmount);
-                Messaging.send(player, tag + infoPrimaryColor + "Current bid: " + infoSecondaryColor + currentBid + " " + this.iConomy.currency);
-                Messaging.send(player, tag + infoPrimaryColor + "Owner: " + infoSecondaryColor + auctionOwner.getDisplayName());
+                player.sendMessage(tagColor + "-----[ " + auctionStatusColor + "Auction Information" + tagColor + " ]-----");
+                player.sendMessage(tag + infoPrimaryColor + "Auctioned Item: " + infoSecondaryColor + Items.name(auctionItemId, auction_item_byte) + infoPrimaryColor + " [" + infoSecondaryColor + auctionItemId + infoPrimaryColor + "]");
+                player.sendMessage(tag + infoPrimaryColor + "Amount: " + infoSecondaryColor + auctionItemAmount);
+                player.sendMessage(tag + infoPrimaryColor + "Current bid: " + infoSecondaryColor + currentBid + " " + bank.getCurrency());
+                player.sendMessage(tag + infoPrimaryColor + "Owner: " + infoSecondaryColor + auctionOwner.getDisplayName());
                 if (winner != null)
-                    Messaging.send(player, tag + infoPrimaryColor + "Current Winner: " + infoSecondaryColor + winner.getDisplayName());
+                    player.sendMessage(tag + infoPrimaryColor + "Current Winner: " + infoSecondaryColor + winner.getDisplayName());
             } else
                 warn(player, "No auctions in session at the moment!");
         }
     }
 
     public void auctionStop(Player player) {
-    	if((permissionsEnabled && this.Permissions.has(player, "auction.end")) || player == auctionOwner || player.isOp())
+    	if(((permissionsEnabled || groupManagerEnabled) && Permissions.has(player, "auction.end")) || player == auctionOwner || player.isOp())
     	{
     		if (isAuction) {
     			isAuction = false;
@@ -461,20 +505,18 @@ public class iAuction extends JavaPlugin {
     			if (win) {
     				PlayerInventory winv = winner.getInventory();
 
-    				broadcast(auctionStatusColor + "-- Auction Ended -- Winner [ " + winner.getDisplayName() + " ] -- ");
-    				Messaging.send(winner, tag + auctionStatusColor + "Enjoy your items!");
-    				Messaging.send(auctionOwner, tag + auctionStatusColor + "Your items have been sold for " + currentBid + " " + this.iConomy.currency + "!");
+    				broadcast(auctionStatusColor + "-- Auction Ended -- Winner [ " + winner.getDisplayName() + auctionStatusColor + " ] -- ");
+    				winner.sendMessage(tag + auctionStatusColor + "Enjoy your items!");
+    				auctionOwner.sendMessage(tag + auctionStatusColor + "Your items have been sold for " + currentBid + " " + bank.getCurrency() + "!");
 
-    				int balance = this.iConomy.db.get_balance(winner.getName());
-    				balance -= currentBid;
-    				this.iConomy.db.set_balance(winner.getName(), balance);
-    				balance = this.iConomy.db.get_balance(auctionOwner.getName());
-    				balance += currentBid;
-    				this.iConomy.db.set_balance(auctionOwner.getName(), balance);
+    				Account acc = bank.getAccount(winner.getName());
+    				acc.subtract(currentBid);
+    				acc = bank.getAccount(auctionOwner.getName());
+    				acc.add(currentBid);
     				winv.addItem(new ItemStack[]{new ItemStack(auctionItemId, auctionItemAmount, auctionItemDamage, (byte)auction_item_byte)});
     			} else {
     				broadcast(auctionStatusColor + "-- Auction ended with no bids --");
-    				Messaging.send(auctionOwner, tag + auctionStatusColor + "Your items have been returned to you!");
+    				auctionOwner.sendMessage(tag + auctionStatusColor + "Your items have been returned to you!");
     				auctionOwner.getInventory().addItem(new ItemStack[]{new ItemStack(auctionItemId, auctionItemAmount, auctionItemDamage, (byte)auction_item_byte)});
     			}
 
@@ -496,25 +538,25 @@ public class iAuction extends JavaPlugin {
     }
 
     public void auctionBid(Player player, String[] msg) {
-    	if(!permissionsEnabled || this.Permissions.has(player, "auction.bid")) {
+    	if(!(permissionsEnabled || groupManagerEnabled) || Permissions.has(player, "auction.bid")) {
     		if(msg.length == 2 || msg.length == 3) {
     			if(player != auctionOwner) {
     				String name = player.getName();
-    		    	int balance = this.iConomy.db.get_balance(name);
-    		    	int bid;
-    		    	int sbid;
+    		    	Account acc = bank.getAccount(name);
+    		    	double bid;
+    		    	double sbid;
     		    	try {
-    		    		bid = Integer.parseInt(msg[1]);
+    		    		bid = Double.parseDouble(msg[1]);
     		    		if(msg.length == 2)
     		    			sbid = 0;
     		    		else
-    		    			sbid = Integer.parseInt(msg[2]);
-    		    	} catch(NumberFormatException ex) {
+    		    			sbid = Double.parseDouble(msg[2]);
+    		    	} catch(Exception ex) {
     		            warn(player, " Invalid syntax.");
     		            help(player);
     		            return;
     		    	}
-    		    	if(bid <= balance && sbid <= balance) {
+    		    	if(bid <= acc.getBalance() && sbid <= acc.getBalance()) {
     		            if (isAuction) {
     		                if (bid > currentBid) {
     		                    win = true;
@@ -523,10 +565,10 @@ public class iAuction extends JavaPlugin {
     		                        currentBid = bid;
     		                        auctionItemBid = sbid;
     		                        winner = player;
-    		                        broadcast(auctionStatusColor + "Bid raised to " + auctionTimeColor + bid + " " + this.iConomy.currency + auctionStatusColor + " by " + auctionTimeColor + player.getDisplayName());
+    		                        broadcast(auctionStatusColor + "Bid raised to " + auctionTimeColor + bid + " " + bank.getCurrency() + auctionStatusColor + " by " + auctionTimeColor + player.getDisplayName());
     		                    } else {
-    		                        Messaging.send(player, tag + auctionStatusColor + "You have been outbid by " + auctionTimeColor + winner.getDisplayName() + auctionStatusColor + "'s secret bid!");
-    		                        broadcast(auctionStatusColor + "Bid raised! Currently stands at: " + auctionTimeColor + (bid + 1) + " " + this.iConomy.currency );
+    		                        player.sendMessage(tag + auctionStatusColor + "You have been outbid by " + auctionTimeColor + winner.getDisplayName() + auctionStatusColor + "'s secret bid!");
+    		                        broadcast(auctionStatusColor + "Bid raised! Currently stands at: " + auctionTimeColor + (bid + 1) + " " + bank.getCurrency() );
     		                        currentBid = bid + 1;
 
     		                    }
@@ -538,7 +580,7 @@ public class iAuction extends JavaPlugin {
     		            }
     		    	} else {
     		    		warn(player, "You don't have enough money!");
-    		    		warn(player, "Your current balance is: " + balance + " " + this.iConomy.currency);
+    		    		warn(player, "Your current balance is: " + acc.getBalance() + " " + bank.getCurrency());
     		    	}
     			} else {
     	    		warn(player, "You can't bid on your own auction!");
